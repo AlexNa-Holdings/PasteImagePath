@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_PATH="${ROOT_DIR}/PasteImagePathApp.xcodeproj"
+PBXPROJ_PATH="${PROJECT_PATH}/project.pbxproj"
+SCHEME="PasteImagePathApp"
+DERIVED_DATA_PATH="${ROOT_DIR}/build/DerivedData"
+DIST_DIR="${ROOT_DIR}/dist"
+REPO_SLUG="${GITHUB_REPO:-AlexNa-Holdings/PasteImagePath}"
+PART="patch"
+EXPLICIT_VERSION=""
+NO_PUSH=0
+NO_RELEASE=0
+
+usage() {
+  cat <<'EOF'
+Usage: ./release [options]
+
+Options:
+  --part patch|minor|major   Version part to increment (default: patch)
+  --version X.Y.Z            Set an explicit version instead of incrementing
+  --no-push                  Do not push commit/tag to origin
+  --no-release               Do not create a GitHub release
+  -h, --help                 Show help
+
+Environment:
+  GITHUB_REPO                Override GitHub repo slug (default: AlexNa-Holdings/PasteImagePath)
+EOF
+}
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+normalize_semver() {
+  local v="$1"
+  IFS='.' read -r a b c <<<"$v"
+  a="${a:-0}"
+  b="${b:-0}"
+  c="${c:-0}"
+  echo "${a}.${b}.${c}"
+}
+
+increment_semver() {
+  local v="$1"
+  local part="$2"
+  IFS='.' read -r major minor patch <<<"$v"
+  case "$part" in
+    patch) patch=$((patch + 1)) ;;
+    minor) minor=$((minor + 1)); patch=0 ;;
+    major) major=$((major + 1)); minor=0; patch=0 ;;
+    *)
+      echo "Invalid --part value: ${part}" >&2
+      exit 1
+      ;;
+  esac
+  echo "${major}.${minor}.${patch}"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --part)
+      PART="${2:-}"
+      shift 2
+      ;;
+    --version)
+      EXPLICIT_VERSION="${2:-}"
+      shift 2
+      ;;
+    --no-push)
+      NO_PUSH=1
+      shift
+      ;;
+    --no-release)
+      NO_RELEASE=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+require_cmd git
+require_cmd perl
+require_cmd xcodebuild
+require_cmd ditto
+require_cmd gh
+
+cd "${ROOT_DIR}"
+
+if [[ ! -f "${PBXPROJ_PATH}" ]]; then
+  echo "Cannot find project file at ${PBXPROJ_PATH}" >&2
+  exit 1
+fi
+
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "Working tree is not clean. Commit/stash changes before running release." >&2
+  exit 1
+fi
+
+if ! git remote get-url origin >/dev/null 2>&1; then
+  echo "Git remote 'origin' is not configured." >&2
+  exit 1
+fi
+
+current_version_raw="$(sed -n 's/.*MARKETING_VERSION = \([0-9][0-9.]*\);/\1/p' "${PBXPROJ_PATH}" | head -n 1)"
+if [[ -z "${current_version_raw}" ]]; then
+  echo "Could not read MARKETING_VERSION from project file." >&2
+  exit 1
+fi
+
+current_build="$(sed -n 's/.*CURRENT_PROJECT_VERSION = \([0-9][0-9]*\);/\1/p' "${PBXPROJ_PATH}" | head -n 1)"
+if [[ -z "${current_build}" ]]; then
+  echo "Could not read CURRENT_PROJECT_VERSION from project file." >&2
+  exit 1
+fi
+
+current_version="$(normalize_semver "${current_version_raw}")"
+if [[ -n "${EXPLICIT_VERSION}" ]]; then
+  if [[ ! "${EXPLICIT_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Explicit version must be X.Y.Z (for example: 1.2.3)." >&2
+    exit 1
+  fi
+  new_version="${EXPLICIT_VERSION}"
+else
+  new_version="$(increment_semver "${current_version}" "${PART}")"
+fi
+new_build=$((current_build + 1))
+tag="v${new_version}"
+
+if git rev-parse "${tag}" >/dev/null 2>&1; then
+  echo "Tag ${tag} already exists. Choose a different version." >&2
+  exit 1
+fi
+
+last_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+if [[ -n "${last_tag}" ]]; then
+  commit_range="${last_tag}..HEAD"
+else
+  commit_range="HEAD"
+fi
+changes="$(git log --pretty=format:'- %s' ${commit_range} | head -n 30 || true)"
+if [[ -z "${changes}" ]]; then
+  changes="- Internal maintenance updates"
+fi
+
+echo "Releasing ${tag}"
+echo "Current version/build: ${current_version_raw} (${current_build})"
+echo "New version/build: ${new_version} (${new_build})"
+
+perl -0pi -e "s/MARKETING_VERSION = [0-9]+(?:\\.[0-9]+){1,2};/MARKETING_VERSION = ${new_version};/g" "${PBXPROJ_PATH}"
+perl -0pi -e "s/CURRENT_PROJECT_VERSION = [0-9]+;/CURRENT_PROJECT_VERSION = ${new_build};/g" "${PBXPROJ_PATH}"
+
+mkdir -p "${DIST_DIR}"
+xcodebuild \
+  -project "${PROJECT_PATH}" \
+  -scheme "${SCHEME}" \
+  -configuration Release \
+  -derivedDataPath "${DERIVED_DATA_PATH}" \
+  clean build
+
+app_path="${DERIVED_DATA_PATH}/Build/Products/Release/${SCHEME}.app"
+if [[ ! -d "${app_path}" ]]; then
+  echo "Build succeeded but app bundle not found at ${app_path}" >&2
+  exit 1
+fi
+
+zip_path="${DIST_DIR}/${SCHEME}-${tag}.zip"
+rm -f "${zip_path}"
+ditto -c -k --sequesterRsrc --keepParent "${app_path}" "${zip_path}"
+
+git add "${PBXPROJ_PATH}"
+git commit \
+  -m "release: ${tag}" \
+  -m "Automated release build for ${tag}" \
+  -m "- bump MARKETING_VERSION to ${new_version}" \
+  -m "- bump CURRENT_PROJECT_VERSION to ${new_build}" \
+  -m "- build artifact: $(basename "${zip_path}")"
+
+git tag -a "${tag}" -m "Release ${tag}"
+
+if [[ "${NO_PUSH}" -eq 0 ]]; then
+  git push origin HEAD
+  git push origin "${tag}"
+fi
+
+if [[ "${NO_RELEASE}" -eq 0 ]]; then
+  notes_file="$(mktemp)"
+  {
+    echo "## Changes"
+    echo
+    echo "${changes}"
+  } > "${notes_file}"
+
+  gh release create "${tag}" "${zip_path}" \
+    --repo "${REPO_SLUG}" \
+    --title "${tag}" \
+    --notes-file "${notes_file}"
+
+  rm -f "${notes_file}"
+fi
+
+echo "Release complete: ${tag}"
+echo "Artifact: ${zip_path}"
