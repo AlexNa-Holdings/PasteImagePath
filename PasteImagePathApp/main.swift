@@ -865,7 +865,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 let app = NSApplication.shared
-let delegate = AppDelegate()
+let delegate = { @MainActor in AppDelegate() }()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
 app.run()
