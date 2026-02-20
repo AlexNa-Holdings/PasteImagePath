@@ -218,6 +218,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var captureMonitorLocal: Any?
     private var captureTimeoutWorkItem: DispatchWorkItem?
     private var hotKeyConfig = HotKeyConfig.load()
+    private var insertSpaceBeforePath: Bool {
+        get { UserDefaults.standard.object(forKey: "InsertSpaceBeforePath") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "InsertSpaceBeforePath") }
+    }
     private var isCapturingHotkey = false
     private var preferencesWindow: NSWindow?
     private var preferencesHotkeyValueLabel: NSTextField?
@@ -344,8 +348,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func toggleInsertSpace(_ sender: NSButton) {
+        insertSpaceBeforePath = sender.state == .on
+        log("Insert space before path: \(insertSpaceBeforePath)")
+    }
+
     private func makePreferencesWindow() -> NSWindow {
-        let frame = NSRect(x: 0, y: 0, width: 440, height: 230)
+        let frame = NSRect(x: 0, y: 0, width: 440, height: 280)
         let window = NSWindow(
             contentRect: frame,
             styleMask: [.titled, .closable],
@@ -353,6 +362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         window.title = "PasteImagePath Preferences"
+        window.isReleasedWhenClosed = false
         window.center()
 
         let content = NSView(frame: frame)
@@ -379,7 +389,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         noteLabel.maximumNumberOfLines = 2
         noteLabel.lineBreakMode = .byWordWrapping
 
-        let stack = NSStackView(views: [titleLabel, hotkeyCaption, hotkeyValue, statusLabel, recordButton, noteLabel])
+        let spaceCheckbox = NSButton(checkboxWithTitle: "Insert space before path", target: self, action: #selector(toggleInsertSpace(_:)))
+        spaceCheckbox.state = insertSpaceBeforePath ? .on : .off
+
+        let stack = NSStackView(views: [titleLabel, hotkeyCaption, hotkeyValue, statusLabel, recordButton, noteLabel, spaceCheckbox])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -417,6 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         window.title = "About PasteImagePathApp"
+        window.isReleasedWhenClosed = false
         window.center()
 
         let content = NSView(frame: frame)
@@ -564,8 +578,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         pasteboard.clearContents()
-        pasteboard.setString(path, forType: .string)
-        log("Image saved and clipboard replaced with path: \(path)")
+        let pasteString = insertSpaceBeforePath ? " \(path)" : path
+        pasteboard.setString(pasteString, forType: .string)
+        log("Image saved and clipboard replaced with path: \(pasteString)")
         recordRecentImage(path: path, image: image)
         showPreview(image: image, path: path, seconds: 3.0)
         queuePasteWhenHotkeyModifiersRelease { [weak self] in
@@ -599,7 +614,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menuItem.target = self
             menuItem.representedObject = entry.path
             menuItem.toolTip = entry.path
-            menuItem.image = thumbnailImage(for: entry.image, size: NSSize(width: 22, height: 22))
+            menuItem.image = thumbnailImage(for: entry.image, size: NSSize(width: 48, height: 48))
             recentImagesMenu.addItem(menuItem)
         }
     }
@@ -623,8 +638,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(path, forType: .string)
-        log("Pasting saved image path: \(path)")
+        let pasteString = insertSpaceBeforePath ? " \(path)" : path
+        pasteboard.setString(pasteString, forType: .string)
+        log("Pasting saved image path: \(pasteString)")
 
         if let recent = recentImages.first(where: { $0.path == path }) {
             showPreview(image: recent.image, path: path, seconds: 2.0)
@@ -772,7 +788,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func simulateCommandVNow() {
-        guard isAccessibilityTrusted(prompt: true) else {
+        guard isAccessibilityTrusted(prompt: false) else {
             log("Cannot simulate Command+V because Accessibility permission is missing.")
             return
         }
