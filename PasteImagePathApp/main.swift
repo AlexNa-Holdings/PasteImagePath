@@ -206,6 +206,7 @@ final class HotKeyManager {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var hotKeyManager: HotKeyManager?
