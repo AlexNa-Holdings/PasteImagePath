@@ -74,12 +74,14 @@ Use the root script:
 ```
 
 What it does:
+- Switches to `main` before release work starts.
 - Bumps app version (`MARKETING_VERSION`) and build number (`CURRENT_PROJECT_VERSION`).
 - Builds `Release` for target `PasteImagePathApp`.
 - Packages the built app as `dist/PasteImagePathApp-vX.Y.Z.zip`.
 - Creates a release commit and tag.
-- Pushes commit/tag to `origin`.
+- Pushes release code to `prod` (from `main`) and pushes tag to `origin`.
 - Creates a GitHub Release and uploads the zip artifact.
+- Returns to `main` after the script finishes.
 
 Options:
 

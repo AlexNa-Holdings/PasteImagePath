@@ -8,10 +8,13 @@ SCHEME="PasteImagePathApp"
 DERIVED_DATA_PATH="${ROOT_DIR}/build/DerivedData"
 DIST_DIR="${ROOT_DIR}/dist"
 REPO_SLUG="${GITHUB_REPO:-AlexNa-Holdings/PasteImagePath}"
+MAIN_BRANCH="main"
+PROD_BRANCH="${PROD_BRANCH:-prod}"
 PART="patch"
 EXPLICIT_VERSION=""
 NO_PUSH=0
 NO_RELEASE=0
+SWITCHED_BRANCH=0
 
 usage() {
   cat <<'EOF'
@@ -26,6 +29,7 @@ Options:
 
 Environment:
   GITHUB_REPO                Override GitHub repo slug (default: AlexNa-Holdings/PasteImagePath)
+  PROD_BRANCH                Override production branch (default: prod)
 EOF
 }
 
@@ -99,6 +103,13 @@ require_cmd gh
 
 cd "${ROOT_DIR}"
 
+cleanup() {
+  if [[ "${SWITCHED_BRANCH}" -eq 1 ]]; then
+    git checkout "${MAIN_BRANCH}" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
 if [[ ! -f "${PBXPROJ_PATH}" ]]; then
   echo "Cannot find project file at ${PBXPROJ_PATH}" >&2
   exit 1
@@ -112,6 +123,18 @@ fi
 if ! git remote get-url origin >/dev/null 2>&1; then
   echo "Git remote 'origin' is not configured." >&2
   exit 1
+fi
+
+if ! git rev-parse --verify "${MAIN_BRANCH}" >/dev/null 2>&1; then
+  echo "Main branch '${MAIN_BRANCH}' does not exist locally." >&2
+  exit 1
+fi
+
+current_branch="$(git branch --show-current)"
+if [[ "${current_branch}" != "${MAIN_BRANCH}" ]]; then
+  echo "Switching from '${current_branch}' to '${MAIN_BRANCH}' for release."
+  git checkout "${MAIN_BRANCH}"
+  SWITCHED_BRANCH=1
 fi
 
 current_version_raw="$(sed -n 's/.*MARKETING_VERSION = \([0-9][0-9.]*\);/\1/p' "${PBXPROJ_PATH}" | head -n 1)"
@@ -191,7 +214,7 @@ git commit \
 git tag -a "${tag}" -m "Release ${tag}"
 
 if [[ "${NO_PUSH}" -eq 0 ]]; then
-  git push origin HEAD
+  git push origin "${MAIN_BRANCH}:${PROD_BRANCH}"
   git push origin "${tag}"
 fi
 
