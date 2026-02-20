@@ -79,7 +79,7 @@ What it does:
 - Builds `Release` for target `PasteImagePathApp`.
 - Packages the built app as `dist/PasteImagePathApp-vX.Y.Z.zip`.
 - Creates a release commit and tag.
-- Pushes release code to `prod` (from `main`) and pushes tag to `origin`.
+- Pushes release code to `prod` (from `main`, using safe `--force-with-lease`) and pushes tag to `origin`.
 - Creates a GitHub Release and uploads the zip artifact.
 - Returns to `main` after the script finishes.
 

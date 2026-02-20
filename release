@@ -214,7 +214,12 @@ git commit \
 git tag -a "${tag}" -m "Release ${tag}"
 
 if [[ "${NO_PUSH}" -eq 0 ]]; then
-  git push origin "${MAIN_BRANCH}:${PROD_BRANCH}"
+  git fetch origin "${PROD_BRANCH}" >/dev/null 2>&1 || true
+  if git show-ref --verify --quiet "refs/remotes/origin/${PROD_BRANCH}"; then
+    git push --force-with-lease origin "${MAIN_BRANCH}:${PROD_BRANCH}"
+  else
+    git push origin "${MAIN_BRANCH}:${PROD_BRANCH}"
+  fi
   git push origin "${tag}"
 fi
 
