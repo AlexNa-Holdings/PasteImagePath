@@ -206,8 +206,7 @@ final class HotKeyManager {
     }
 }
 
-@MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, @preconcurrency NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var hotKeyManager: HotKeyManager?
     private var hotkeyStatusMenuItem: NSMenuItem?
@@ -865,7 +864,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 let app = NSApplication.shared
-let delegate = { @MainActor in AppDelegate() }()
+let delegate = AppDelegate()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
 app.run()
