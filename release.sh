@@ -14,7 +14,11 @@ PART="patch"
 EXPLICIT_VERSION=""
 NO_PUSH=0
 NO_RELEASE=0
+REQUIRE_CLEAN=0
 SWITCHED_BRANCH=0
+AUTO_STASHED=0
+AUTO_STASH_NAME=""
+ORIGINAL_BRANCH=""
 
 usage() {
   cat <<'EOF'
@@ -25,6 +29,7 @@ Options:
   --version X.Y.Z            Set an explicit version instead of incrementing
   --no-push                  Do not push commit/tag to origin
   --no-release               Do not create a GitHub release
+  --require-clean            Fail if working tree is not clean (old behavior)
   -h, --help                 Show help
 
 Environment:
@@ -83,6 +88,10 @@ while [[ $# -gt 0 ]]; do
       NO_RELEASE=1
       shift
       ;;
+    --require-clean)
+      REQUIRE_CLEAN=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -104,6 +113,11 @@ require_cmd gh
 cd "${ROOT_DIR}"
 
 cleanup() {
+  if [[ "${AUTO_STASHED}" -eq 1 ]]; then
+    if ! git stash pop --index >/dev/null 2>&1; then
+      echo "Warning: could not auto-restore stashed changes. Run 'git stash list' and restore '${AUTO_STASH_NAME}' manually." >&2
+    fi
+  fi
   if [[ "${SWITCHED_BRANCH}" -eq 1 ]]; then
     git checkout "${MAIN_BRANCH}" >/dev/null 2>&1 || true
   fi
@@ -115,10 +129,7 @@ if [[ ! -f "${PBXPROJ_PATH}" ]]; then
   exit 1
 fi
 
-if [[ -n "$(git status --porcelain)" ]]; then
-  echo "Working tree is not clean. Commit/stash changes before running release." >&2
-  exit 1
-fi
+ORIGINAL_BRANCH="$(git branch --show-current)"
 
 if ! git remote get-url origin >/dev/null 2>&1; then
   echo "Git remote 'origin' is not configured." >&2
@@ -130,11 +141,23 @@ if ! git rev-parse --verify "${MAIN_BRANCH}" >/dev/null 2>&1; then
   exit 1
 fi
 
-current_branch="$(git branch --show-current)"
+current_branch="${ORIGINAL_BRANCH}"
 if [[ "${current_branch}" != "${MAIN_BRANCH}" ]]; then
   echo "Switching from '${current_branch}' to '${MAIN_BRANCH}' for release."
   git checkout "${MAIN_BRANCH}"
   SWITCHED_BRANCH=1
+fi
+
+if [[ -n "$(git status --porcelain)" ]]; then
+  if [[ "${REQUIRE_CLEAN}" -eq 1 ]]; then
+    echo "Working tree is not clean. Commit/stash changes before running release." >&2
+    exit 1
+  fi
+
+  AUTO_STASH_NAME="release-autostash-$(date +%Y%m%d-%H%M%S)"
+  echo "Working tree is dirty on '${MAIN_BRANCH}'. Auto-stashing changes as '${AUTO_STASH_NAME}'."
+  git stash push --include-untracked -m "${AUTO_STASH_NAME}" >/dev/null
+  AUTO_STASHED=1
 fi
 
 current_version_raw="$(sed -n 's/.*MARKETING_VERSION = \([0-9][0-9.]*\);/\1/p' "${PBXPROJ_PATH}" | head -n 1)"
@@ -162,10 +185,12 @@ fi
 new_build=$((current_build + 1))
 tag="v${new_version}"
 
-if git rev-parse "${tag}" >/dev/null 2>&1; then
-  echo "Tag ${tag} already exists. Choose a different version." >&2
-  exit 1
-fi
+while git rev-parse "${tag}" >/dev/null 2>&1; do
+  echo "Tag ${tag} already exists, incrementing ${PART}..."
+  new_version="$(increment_semver "${new_version}" "${PART}")"
+  new_build=$((new_build + 1))
+  tag="v${new_version}"
+done
 
 last_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
 if [[ -n "${last_tag}" ]]; then

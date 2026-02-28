@@ -90,12 +90,17 @@ Options:
 ./release --version 1.2.3
 ./release --no-push
 ./release --no-release
+./release --require-clean
 ```
 
 Requirements:
-- Clean git working tree.
+- `main` branch available locally and `origin` configured.
 - `gh` CLI installed and authenticated (`gh auth login`).
 - `xcodebuild` available.
+
+Notes:
+- By default, if `main` has local changes, the script auto-stashes and restores them after release.
+- Use `--require-clean` to enforce a clean working tree check.
 
 ## License
 
