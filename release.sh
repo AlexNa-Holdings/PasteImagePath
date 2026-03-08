@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_PATH="${ROOT_DIR}/PasteImagePathApp.xcodeproj"
 PBXPROJ_PATH="${PROJECT_PATH}/project.pbxproj"
 SCHEME="PasteImagePathApp"
+SIGN_IDENTITY="Developer ID Application: AlexNa Holdings Inc (699YXKT8B6)"
+NOTARY_PROFILE="notarytool-profile"
 DERIVED_DATA_PATH="${ROOT_DIR}/build/DerivedData"
 DIST_DIR="${ROOT_DIR}/dist"
 REPO_SLUG="${GITHUB_REPO:-AlexNa-Holdings/PasteImagePath}"
@@ -216,6 +218,8 @@ xcodebuild \
   -scheme "${SCHEME}" \
   -configuration Release \
   -derivedDataPath "${DERIVED_DATA_PATH}" \
+  CODE_SIGN_IDENTITY="${SIGN_IDENTITY}" \
+  CODE_SIGN_STYLE=Manual \
   clean build
 
 app_path="${DERIVED_DATA_PATH}/Build/Products/Release/${SCHEME}.app"
@@ -224,7 +228,27 @@ if [[ ! -d "${app_path}" ]]; then
   exit 1
 fi
 
+echo "Signing app with Developer ID..."
+codesign --deep --force --options runtime \
+  --sign "${SIGN_IDENTITY}" \
+  "${app_path}"
+
+codesign --verify --verbose "${app_path}"
+echo "Code signing verified."
+
 zip_path="${DIST_DIR}/${SCHEME}-${tag}.zip"
+rm -f "${zip_path}"
+ditto -c -k --sequesterRsrc --keepParent "${app_path}" "${zip_path}"
+
+echo "Submitting for notarization..."
+xcrun notarytool submit "${zip_path}" \
+  --keychain-profile "${NOTARY_PROFILE}" \
+  --wait
+
+echo "Stapling notarization ticket..."
+xcrun stapler staple "${app_path}"
+
+# Re-zip after stapling so the distributed zip includes the ticket
 rm -f "${zip_path}"
 ditto -c -k --sequesterRsrc --keepParent "${app_path}" "${zip_path}"
 
